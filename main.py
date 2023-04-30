@@ -24,10 +24,14 @@ class NmeaEmulator:
         self.nmea_obj = None
         with open(settings_file) as f:
             settings = json.load(f)
-        self.position = {'latitude_value': settings['latitude_value'],
-                         'latitude_direction': settings['latitude_direction'],
-                         'longitude_value': settings['longitude_value'],
-                         'longitude_direction': settings['longitude_direction'],}
+        lat_value, lat_dir, lon_value, lon_dir = gps_dec_to_degmin(
+            settings['latitude'],
+            settings['longitude']
+        )
+        self.position = {'latitude_value': lat_value,
+                         'latitude_direction': lat_dir,
+                         'longitude_value': lon_value,
+                         'longitude_direction': lon_dir}
         self.altitude = settings['gps_altitude_amsl']
         self.speed = settings['gps_speed']
         self.heading = settings['gps_heading']
@@ -127,6 +131,19 @@ class NmeaSrvThread(threading.Thread):
                     # Close thread
                     sys.exit()
             time.sleep(1 - (time.perf_counter() - timer_start))
+
+
+def gps_dec_to_degmin(lat, lon):
+    lat_deg = int(abs(lat))
+    lat_dec_min = 60 * (abs(lat) - lat_deg)
+    lat_value = f'{lat_deg:02d}{lat_dec_min:09.6f}'
+    lat_dir = 'N' if lat_deg > 0 else 'S'
+
+    lon_deg = int(abs(lon))
+    lon_dec_min = 60 * (abs(lon) - lon_deg)
+    lon_value = f'{lon_deg:03d}{lon_dec_min:09.6f}'
+    lon_dir = 'E' if lon_deg > 0 else 'W'
+    return lat_value, lat_dir, lon_value, lon_dir
 
 
 def parse_command_line_args():
