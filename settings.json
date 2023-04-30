@@ -1,0 +1,12 @@
+{
+  "latitude_value": "5430.000",
+  "latitude_direction": "N",
+  "longitude_value": "01920.000",
+  "longitude_direction": "E",
+  "gps_altitude_amsl": 15.2,
+  "gps_heading": 90.0,
+  "gps_speed": 10.035,
+  "ip_address": "0.0.0.0",
+  "port": 14291,
+  "num_allowed_connections": 10
+}
