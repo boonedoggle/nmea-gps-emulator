@@ -5,6 +5,6 @@
   "gps_heading": 0.0,
   "gps_speed": 0.0,
   "ip_address": "0.0.0.0",
-  "port": 14291,
+  "port": 10110,
   "num_allowed_connections": 10
 }
