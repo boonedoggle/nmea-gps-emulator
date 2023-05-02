@@ -1,0 +1,14 @@
+# Copyright 2019-2020, Deepwave Digital, Inc.
+# SPDX-License-Identifier: Commercial
+
+[Unit]
+Description=NMEA GPS Emulator
+
+[Service]
+Type=simple
+ExecStartPre=/bin/sleep 15
+ExecStart=/opt/nmea-gps-emulator/venv/bin/python /opt/nmea-gps-emulator/main.py
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target

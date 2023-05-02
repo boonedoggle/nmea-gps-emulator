@@ -64,18 +64,23 @@ Below instructions will get you a copy of the project up and running on your loc
 ### Installation conda
 The script can be build and run locally with virtualenv tool. Run following commands in order to create virtual environment and install the required packages.
 ```bash
-$ conda env create -f nmea-gps.yml
-$ conda activate nmea-gps
+$ conda env create -f nmea-gps-emulator.yml
+$ conda activate nmea-gps-emulator
 ```
 
 ### Running the script
 You can start the script using the following command:
 ```bash
-(nmea-gps) $ python main.py
+(nmea-gps-emulator) $ python main.py
 ```
 
 After starting the script correctly, the following prompt the emulation will start and
 print the output whenever a client connects
+
+## Installing as a system service
+```bash
+$ sudo bash install.sh
+```
 
 ## Connect to GPSD
 

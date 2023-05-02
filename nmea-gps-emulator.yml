@@ -1,4 +1,4 @@
-name: nmea-gps
+name: nmea-gps-emulator
 channels:
   - conda-forge
 
