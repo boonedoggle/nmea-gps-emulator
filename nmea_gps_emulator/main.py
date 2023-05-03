@@ -10,12 +10,13 @@ import threading
 import time
 from pathlib import Path
 
-from nmea_gps import NmeaMsg
+from .nmea_gps import NmeaMsg
 
 
 _SCRIPT_DIR = Path(__file__).parent.absolute()
-_PACKAGE_ROOT = _SCRIPT_DIR
-_DEFAULT_SETTINGS_FILE = _PACKAGE_ROOT / 'settings.json'
+_PACKAGE_ROOT = _SCRIPT_DIR.parent
+_DEFAULT_SETTINGS_FILE = _PACKAGE_ROOT / 'settings' /'settings.json'
+print(_DEFAULT_SETTINGS_FILE)
 
 
 class NmeaEmulator:
@@ -142,7 +143,7 @@ def gps_dec_to_degmin(lat, lon):
     lon_deg = int(abs(lon))
     lon_dec_min = 60 * (abs(lon) - lon_deg)
     lon_value = f'{lon_deg:03d}{lon_dec_min:09.6f}'
-    lon_dir = 'W' if lon_ > 0 else 'E'
+    lon_dir = 'W' if lon > 0 else 'E'
     return lat_value, lat_dir, lon_value, lon_dir
 
 
@@ -156,7 +157,7 @@ def parse_command_line_args():
     return parser.parse_args(sys.argv[1:])
 
 
-if __name__ == '__main__':
+def main():
     # Logging config
     log_format = '%(asctime)s: %(message)s'
     logging.basicConfig(format=log_format, level=logging.INFO, datefmt='%H:%M:%S')
@@ -166,3 +167,7 @@ if __name__ == '__main__':
         emulator.run()
     except KeyboardInterrupt:
         sys.exit()
+
+
+if __name__ == '__main__':
+    main()
