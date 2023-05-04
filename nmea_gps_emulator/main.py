@@ -143,7 +143,7 @@ def gps_dec_to_degmin(lat, lon):
     lon_deg = int(abs(lon))
     lon_dec_min = 60 * (abs(lon) - lon_deg)
     lon_value = f'{lon_deg:03d}{lon_dec_min:09.6f}'
-    lon_dir = 'W' if lon > 0 else 'E'
+    lon_dir = 'E' if lon > 0 else 'W'
     return lat_value, lat_dir, lon_value, lon_dir
 
 
