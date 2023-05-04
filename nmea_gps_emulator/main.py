@@ -15,7 +15,7 @@ from .nmea_gps import NmeaMsg
 
 _SCRIPT_DIR = Path(__file__).parent.absolute()
 _PACKAGE_ROOT = _SCRIPT_DIR.parent
-_DEFAULT_SETTINGS_FILE = _PACKAGE_ROOT / 'settings' /'settings.json'
+_DEFAULT_SETTINGS_FILE = _PACKAGE_ROOT / 'settings' / 'settings.json'
 print(_DEFAULT_SETTINGS_FILE)
 
 

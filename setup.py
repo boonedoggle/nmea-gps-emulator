@@ -10,7 +10,7 @@ import distutils.command.build
 import distutils.core
 import glob
 import os
-from utils import update_gpsd_devices
+from utils import update_gpsd_devices, add_system_services
 import setuptools
 import pkg_resources
 import sys
@@ -48,4 +48,5 @@ try:
         },
     )
 finally:
+    add_system_services()
     update_gpsd_devices()

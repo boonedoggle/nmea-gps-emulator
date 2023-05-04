@@ -1,5 +1,7 @@
 import json
 import subprocess
+import glob
+import shutil
 
 GPSD_CONFIG_FILE = '/etc/default/gpsd'
 DEFAULT_SETTINGS_FILE = '/opt/nmea-gps-emulator/settings/settings.json'
@@ -36,5 +38,9 @@ def update_gpsd_devices(settings_file=DEFAULT_SETTINGS_FILE,
     subprocess.Popen(['systemctl', 'restart', 'gpsd'], shell=False)
 
 
-if __name__ == '__main__':
-    update_gpsd_devices()
+def add_system_services():
+    services_files = list()
+    services_files += glob.glob('services/*.services')
+    for service_file in services_files:
+        shutil.copy(service_file, '/etc/systemd/system/')
+    subprocess.Popen(['systemctl', 'daemon-reload'], shell=False)
