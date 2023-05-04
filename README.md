@@ -50,7 +50,7 @@ sudo git clone https://github.com/boonedoggle/nmea-gps-emulator
 3. Install the package
 ```bash
 cd nmea-gps-emulator
-sudo pip3 install -e .
+sudo -H pip3 install -e .
 ```
 The package is installed at this point, but not running.
 
@@ -133,3 +133,7 @@ tcp://localhost:2947          NMEA0183>
 (74) $GPRMC,002151.000,A,3956.990479,N,07509.923343,E,0.000,0.0,300423,,,A*6B
 (17) $GPHDT,0.0,T*35
 ```
+
+## Troubleshooting
+* Pip too old
+  * `sudo pip3 install --upgrade pip`

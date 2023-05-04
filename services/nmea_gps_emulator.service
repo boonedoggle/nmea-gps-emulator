@@ -6,8 +6,9 @@ Description=NMEA GPS Emulator
 
 [Service]
 Type=simple
-ExecStartPre=/bin/sleep 15
-ExecStart=/opt/nmea-gps-emulator/venv/bin/python /opt/nmea-gps-emulator/main.py
+ExecStart=/usr/local/bin/nmea_gps_emulator
+Restart=always
+RestartSec=5
 StandardOutput=journal
 
 [Install]

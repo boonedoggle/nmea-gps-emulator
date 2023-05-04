@@ -2,7 +2,7 @@ import json
 import subprocess
 
 GPSD_CONFIG_FILE = '/etc/default/gpsd'
-DEFAULT_SETTINGS_FILE = '/opt/nmea-gps-emulator/settings.json'
+DEFAULT_SETTINGS_FILE = '/opt/nmea-gps-emulator/settings/settings.json'
 
 
 def update_gpsd_devices(settings_file=DEFAULT_SETTINGS_FILE,
