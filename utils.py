@@ -1,46 +1,28 @@
-import json
-import subprocess
 import glob
+import os
 import shutil
-
-GPSD_CONFIG_FILE = '/etc/default/gpsd'
-DEFAULT_SETTINGS_FILE = '/opt/nmea-gps-emulator/settings/settings.json'
+import subprocess
 
 
-def update_gpsd_devices(settings_file=DEFAULT_SETTINGS_FILE,
-                        gpsd_config_file=GPSD_CONFIG_FILE):
-    """
-    Adds a server to the GPSD Config file
-    """
-    # Get the GPSD server from the settings file
-    with open(settings_file) as f:
-        settings = json.load(f)
-    ip_address = 'localhost'
-    port = settings['port']
-    new_server = f'tcp://{ip_address}:{port}'
-    # Find line with DEVICES and create new line
-    with open(gpsd_config_file) as f:
-        for line in f:
-            if line.startswith('DEVICES'):
-                old_devices = line
-                key, server_string = line.split('=')
-                server_string = server_string.replace('"', '')
-                server_list = server_string.split()
-                if new_server not in server_list:
-                    server_list += [new_server]
-                new_devices = f'DEVICES="{" ".join(server_list)}"\n'
-    # Update file with new entry
-    with open(gpsd_config_file, 'r') as fr:
-        file_content = fr.read()
-    file_content = file_content.replace(old_devices, new_devices)
-    with open(gpsd_config_file, 'w') as fw:
-        fw.write(file_content)
-    subprocess.Popen(['systemctl', 'restart', 'gpsd'], shell=False)
+def remove_legacy_gpsd_override():
+    """Remove only the gpsd override files created by earlier releases."""
+    paths = [
+        '/etc/systemd/system/gpsd.service',
+        '/etc/systemd/system/gpsd.service.d/nmea-gps-fallback.conf',
+    ]
+    for path in paths:
+        if not os.path.isfile(path):
+            continue
+        with open(path) as stream:
+            contents = stream.read()
+        if 'nmea_gps_emulator.gpsd_fallback' in contents or 'nmea-gps-fallback' in contents:
+            os.remove(path)
 
 
 def add_system_services():
+    remove_legacy_gpsd_override()
     services_files = list()
-    services_files += glob.glob('services/*.services')
+    services_files += glob.glob('services/*.service')
     for service_file in services_files:
         shutil.copy(service_file, '/etc/systemd/system/')
     subprocess.Popen(['systemctl', 'daemon-reload'], shell=False)

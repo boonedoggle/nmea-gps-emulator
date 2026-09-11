@@ -10,7 +10,7 @@ import distutils.command.build
 import distutils.core
 import glob
 import os
-from utils import update_gpsd_devices, add_system_services
+from utils import add_system_services
 import setuptools
 import pkg_resources
 import sys
@@ -44,9 +44,9 @@ try:
         entry_points={
             'console_scripts': [
                 'nmea_gps_emulator = nmea_gps_emulator.main:main',
+                'nmea_gpsd_fallback = nmea_gps_emulator.gpsd_fallback:main',
             ]
         },
     )
 finally:
     add_system_services()
-    update_gpsd_devices()

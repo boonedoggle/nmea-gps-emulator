@@ -3,6 +3,7 @@
 
 [Unit]
 Description=NMEA GPS Emulator
+After=gpsd.service
 
 [Service]
 Type=simple
