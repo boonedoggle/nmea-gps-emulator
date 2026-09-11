@@ -83,6 +83,14 @@ sudo nano /opt/nmea-gps-emulator/settings/settings.json
 sudo systemctl restart nmea_gps_emulator
 ```
 
+Alternatively, use the interactive configuration utility from any directory:
+```bash
+sudo nmea_gps_config
+```
+Press Enter to keep a displayed value. Speed is entered in knots and altitude
+in meters above mean sea level. The utility validates and saves the settings,
+then restarts the emulator service.
+
 * Install GPSD
 
 * Edit the GPSD config file to add the NMEA emulator (on Ubuntu):
