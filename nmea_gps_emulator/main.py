@@ -8,11 +8,14 @@ import json
 import argparse
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 from .nmea_gps import NmeaMsg
+from .configure import write_settings
 from .web import start_server
 from .gpsd_fallback import GpsdFallback
+from .route import ROUTE_STATUS_FILE, RoutePlayer, parse_route
 
 
 _SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -26,6 +29,7 @@ class NmeaEmulator:
         self.nmea_thread = None
         self.nmea_obj = None
         self.settings_file = settings_file
+        write_settings(ROUTE_STATUS_FILE, {"active": False})
         with open(settings_file) as f:
             settings = json.load(f)
         lat_value, lat_dir, lon_value, lon_dir = gps_dec_to_degmin(
@@ -39,12 +43,37 @@ class NmeaEmulator:
         self.altitude = settings['gps_altitude_amsl']
         self.speed = settings['gps_speed']
         self.heading = settings['gps_heading']
+        if settings.get('route_file') and not settings.get('route_enabled', False):
+            self.speed = 0.0
+            if settings.get('gps_speed') != 0.0:
+                settings['gps_speed'] = 0.0
+                write_settings(settings_file, settings)
         self.ip_address = settings['ip_address']
         self.port = settings['port']
         self.num_allowed_connections = settings['num_allowed_connections']
 
         # Initialize NmeaMsg object
         self.nmea_obj = NmeaMsg(self.position, self.altitude, self.speed, self.heading)
+        self.route_player = None
+        route_file = settings.get('route_file') if settings.get('route_enabled', False) else None
+        if route_file:
+            try:
+                route_points = parse_route(route_file)
+                self.route_player = RoutePlayer(
+                    self.nmea_obj,
+                    route_points,
+                    self.speed,
+                    settings.get('route_loop', True),
+                )
+                logging.info('Loaded route %s (%d points)', route_file, len(route_points))
+                write_settings(ROUTE_STATUS_FILE, {"active": True, "route_file": route_file})
+                # Consume the one-time activation. Future service/system
+                # restarts will use the static settings position.
+                settings['route_enabled'] = False
+                settings['gps_speed'] = 0.0
+                write_settings(settings_file, settings)
+            except (OSError, ValueError, zipfile.BadZipFile) as error:
+                logging.error('Unable to load route %s: %s', route_file, error)
 
     def run(self):
         """
@@ -72,6 +101,16 @@ class NmeaEmulator:
             fallback = GpsdFallback()
             fallback_thread = threading.Thread(target=fallback.run, name='gpsd-fallback', daemon=True)
             fallback_thread.start()
+            route_thread = None
+            if self.route_player:
+                def run_route():
+                    self.route_player.run()
+                    write_settings(ROUTE_STATUS_FILE, {"active": False})
+
+                route_thread = threading.Thread(
+                    target=run_route, name='route-player', daemon=True
+                )
+                route_thread.start()
             try:
                 while True:
                     # Number of allowed connections to TCP server.
@@ -92,6 +131,9 @@ class NmeaEmulator:
                         logging.info(f'Connection closed with {ip_add[0]}:{ip_add[1]}')
             finally:
                 fallback.stop()
+                if self.route_player:
+                    self.route_player.stop()
+                write_settings(ROUTE_STATUS_FILE, {"active": False})
                 web_server.shutdown()
 
 

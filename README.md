@@ -96,8 +96,17 @@ The emulator also starts a web interface at
 binds to all IPv4 interfaces. The interface has no authentication, so restrict
 access with the network firewall if the AIR-T is on an untrusted network. When
 gpsd has a position, the page displays it in an interactive Leaflet map using
-OpenStreetMap tiles. The browser needs network access to load Leaflet and map
-tiles, and the required OpenStreetMap attribution is displayed on the map.
+OpenStreetMap, Esri satellite, and Esri topographic tiles. The browser needs
+network access to load Leaflet and map tiles, and the required attributions are
+displayed on the map.
+
+The web interface also accepts `.kmz` and `.kml` route uploads. Set the
+`Speed (knots)` field to a value greater than zero, upload a route, and select
+whether it should loop back and forth. The emulator interpolates the route
+between waypoints and updates its NMEA position smoothly.
+Playback is activated by the upload/restart operation. Subsequent service or
+system restarts use the static coordinates in `settings.json` unless the route
+is uploaded again.
 
 The emulator and fallback selector use the stock GPSD service. Do not add the
 emulator TCP port to `/etc/default/gpsd`; leave the factory hardware devices

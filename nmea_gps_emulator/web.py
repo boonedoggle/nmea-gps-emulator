@@ -2,20 +2,26 @@
 """Small web interface for the NMEA GPS emulator settings."""
 
 import argparse
+import cgi
 import html
+import io
 import json
 import logging
 import math
+import os
 import socket
 import subprocess
+import tempfile
 import threading
 import time
+import zipfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
 from .configure import DEFAULT_SETTINGS_FILE, write_settings
+from .route import ROUTE_STATUS_FILE, parse_route
 
 
 FIELDS = (
@@ -28,6 +34,7 @@ FIELDS = (
 GPSD_HOST = "127.0.0.1"
 GPSD_PORT = 2947
 REAL_STATUS_FILE = "/run/nmea_gpsd_fallback.json"
+ROUTES_DIR = DEFAULT_SETTINGS_FILE.parent / "routes"
 
 
 def real_gps_status():
@@ -39,7 +46,15 @@ def real_gps_status():
         return {"mode": 1, "visible_satellites": None, "used_satellites": None, "source": None}
 
 
-def current_fix(timeout=0.75):
+def active_route_status():
+    try:
+        with open(ROUTE_STATUS_FILE) as stream:
+            return json.load(stream)
+    except (OSError, json.JSONDecodeError):
+        return {"active": False}
+
+
+def current_fix(timeout=1.5):
     """Read the active gpsd source and position without changing gpsd state."""
     source = "Unavailable"
     mode = None
@@ -50,7 +65,7 @@ def current_fix(timeout=0.75):
 
     try:
         with socket.create_connection((GPSD_HOST, GPSD_PORT), timeout=timeout) as sock:
-            sock.settimeout(0.15)
+            sock.settimeout(0.25)
             sock.sendall(b'?WATCH={"enable":true,"json":true}\n')
             end = time.monotonic() + timeout
             data = b""
@@ -113,7 +128,7 @@ def validate_values(form, current):
 
 
 def page(settings, errors=(), message="", source="Unavailable", latitude=None, longitude=None,
-         mode=None, visible_satellites=None, used_satellites=None):
+         mode=None, visible_satellites=None, used_satellites=None, route_points=(), route_active=False):
     fields = []
     for key, label, _minimum, _maximum, _inclusive, units in FIELDS:
         value = html.escape(str(settings.get(key, "")))
@@ -125,18 +140,36 @@ def page(settings, errors=(), message="", source="Unavailable", latitude=None, l
     map_panel = '<p id="map-message">Map unavailable until a position is available.</p>'
     map_script = ""
     auto_update = '<label class="auto-update"><input type="checkbox" id="auto-update"> Auto Update (10s)</label>'
-    if latitude is not None and longitude is not None:
+    has_map_data = latitude is not None and longitude is not None or route_points
+    route_file = settings.get("route_file")
+    route_name = Path(route_file).name if route_file else "No route selected"
+    if route_file and not route_active:
+        route_name += " (inactive)"
+    route_loop = bool(settings.get("route_loop", True))
+    route_controls = f"""
+<fieldset class="route-controls">
+<legend>Route playback</legend>
+<p>Current route: {html.escape(route_name)}</p>
+<label>Upload KMZ/KML route<input type="file" name="route_file_upload" accept=".kmz,.kml"></label>
+<label class="check-option"><input type="checkbox" name="route_loop" value="true"{' checked' if route_loop else ''}> Loop route back and forth</label>
+<label class="check-option"><input type="checkbox" name="clear_route" value="true"> Clear selected route</label>
+</fieldset>"""
+    if has_map_data:
         map_panel = '<div id="map" class="map" aria-label="GPS location map"></div>'
         # Coordinates originate from gpsd and are numeric, but JSON encoding keeps
         # the values safe when inserted into the page's script.
-        map_latitude = json.dumps(latitude)
-        map_longitude = json.dumps(longitude)
+        initial_latitude = latitude if latitude is not None else route_points[0][0]
+        initial_longitude = longitude if longitude is not None else route_points[0][1]
+        map_latitude = json.dumps(initial_latitude)
+        map_longitude = json.dumps(initial_longitude)
         hostname = json.dumps(socket.gethostname())
+        route_coordinates = json.dumps([[point[0], point[1]] for point in route_points])
         map_script = f"""
 <script>
 const gpsLatitude = {map_latitude};
 const gpsLongitude = {map_longitude};
 const hostname = {hostname};
+const routeCoordinates = {route_coordinates};
 const map = L.map('map').setView([gpsLatitude, gpsLongitude], 15);
 const street = L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
     maxZoom: 19,
@@ -154,8 +187,14 @@ const topo = L.tileLayer(
     }});
 street.addTo(map);
 L.control.layers({{Street: street, Satellite: satellite, Topographic: topo}}).addTo(map);
-L.marker([gpsLatitude, gpsLongitude]).addTo(map)
-    .bindPopup(hostname).openPopup();
+if (routeCoordinates.length > 1) {{
+    const routeLine = L.polyline(routeCoordinates, {{color: '#d22', weight: 4}}).addTo(map);
+    map.fitBounds(routeLine.getBounds(), {{padding: [20, 20]}});
+}}
+if ({json.dumps(latitude is not None and longitude is not None)}) {{
+    L.marker([gpsLatitude, gpsLongitude]).addTo(map)
+        .bindPopup(hostname).openPopup();
+}}
 </script>"""
     auto_update_script = """
 <script>
@@ -176,7 +215,9 @@ function scheduleAutoUpdate() {
     } catch (error) {
         // Continue without persistence if browser storage is unavailable.
     }
-    autoUpdateTimer = setTimeout(() => window.location.reload(), 10000);
+    // Navigate to the page URL with GET. This is important after a form POST:
+    // reloading the POST result would submit the settings again every 10s.
+    autoUpdateTimer = setTimeout(() => window.location.replace('/'), 10000);
 }
 autoUpdate.addEventListener('change', () => {
     if (!autoUpdate.checked) {
@@ -207,6 +248,10 @@ body {{ font: 16px sans-serif; max-width: 75rem; margin: 2rem auto; padding: 0 1
 .map {{ height: 28rem; width: 100%; }}
 .auto-update {{ display: flex; align-items: center; gap: .4rem; margin-top: .75rem; }}
 .auto-update input {{ width: auto; }}
+.route-controls {{ display: grid; gap: .75rem; padding: .75rem; }}
+.route-controls p {{ margin: 0; }}
+.check-option {{ display: flex; align-items: center; gap: .4rem; }}
+.check-option input {{ width: auto; }}
 form {{ display: grid; gap: 1rem; }}
 label {{ display: grid; gap: .3rem; }}
 input {{ box-sizing: border-box; font: inherit; padding: .45rem; width: 100%; }}
@@ -221,8 +266,10 @@ button {{ font: inherit; padding: .55rem .9rem; }}
 <p><strong>GPS Satellites:</strong> {html.escape(satellite_status)}</p>
 {status}
 {('<ul class="errors">' + error_html + '</ul>') if errors else ''}
-<form method="post">
+<form method="post" enctype="multipart/form-data">
+<input type="hidden" name="route_loop" value="false">
 {''.join(fields)}
+{route_controls}
 <button type="submit">Save and restart emulator</button>
 </form>
 </section></div>{map_script}{auto_update_script}</body></html>"""
@@ -235,10 +282,27 @@ class Handler(BaseHTTPRequestHandler):
         fix = current_fix()
         real_status = real_gps_status()
         source = real_status.get("source") or fix["source"]
+        latitude = fix["latitude"]
+        longitude = fix["longitude"]
+        # GPSd may not emit a TPV message during this page request even though
+        # the supervisor has already selected a source and recorded its latest
+        # position. Use that position to keep the map stable across refreshes.
+        if latitude is None:
+            latitude = real_status.get("latitude")
+        if longitude is None:
+            longitude = real_status.get("longitude")
+        route_points = ()
+        route_file = settings.get("route_file")
+        route_status = active_route_status()
+        if route_status.get("active") and route_status.get("route_file") == route_file:
+            try:
+                route_points = parse_route(route_file)
+            except (OSError, ValueError, zipfile.BadZipFile) as error:
+                logging.warning("Unable to plot route %s: %s", route_file, error)
         body = page(
-            settings, errors, message, source, fix["latitude"], fix["longitude"],
+            settings, errors, message, source, latitude, longitude,
             real_status.get("mode"), real_status.get("visible_satellites"),
-            real_status.get("used_satellites"),
+            real_status.get("used_satellites"), route_points, bool(route_points),
         ).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -250,6 +314,31 @@ class Handler(BaseHTTPRequestHandler):
         with open(self.settings_file) as stream:
             return json.load(stream)
 
+    def parse_form(self):
+        size = int(self.headers.get("Content-Length", "0"))
+        if size > 50 * 1024 * 1024:
+            raise ValueError("uploaded request is too large")
+        body = self.rfile.read(size)
+        content_type = self.headers.get("Content-Type", "")
+        if not content_type.startswith("multipart/form-data"):
+            return parse_qs(body.decode("utf-8")), None
+
+        form = cgi.FieldStorage(
+            fp=io.BytesIO(body),
+            headers=self.headers,
+            environ={"REQUEST_METHOD": "POST", "CONTENT_TYPE": content_type},
+        )
+        values = {}
+        upload = None
+        for key in form.keys():
+            item = form[key]
+            items = item if isinstance(item, list) else [item]
+            values[key] = [entry.value for entry in items if not entry.filename]
+            for entry in items:
+                if entry.filename:
+                    upload = entry
+        return values, upload
+
     def do_GET(self):  # noqa: N802 - required by BaseHTTPRequestHandler
         try:
             self.send_page(HTTPStatus.OK, self.load())
@@ -258,16 +347,49 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802 - required by BaseHTTPRequestHandler
         try:
-            size = int(self.headers.get("Content-Length", "0"))
-            if size > 8192:
-                self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
-                return
-            form = parse_qs(self.rfile.read(size).decode("utf-8"))
+            form, route_upload = self.parse_form()
             current = self.load()
             settings, errors = validate_values(form, current)
             if errors:
                 self.send_page(HTTPStatus.BAD_REQUEST, settings, errors)
                 return
+
+            settings["route_loop"] = form.get("route_loop", ["false"])[-1].lower() == "true"
+            if form.get("clear_route", ["false"])[-1].lower() == "true":
+                settings["route_file"] = None
+                settings["route_enabled"] = False
+            if route_upload is not None:
+                filename = Path(route_upload.filename).name
+                if Path(filename).suffix.lower() not in (".kmz", ".kml"):
+                    self.send_page(HTTPStatus.BAD_REQUEST, settings, ["Route must be a .kmz or .kml file."])
+                    return
+                if settings["gps_speed"] <= 0:
+                    self.send_page(
+                        HTTPStatus.BAD_REQUEST,
+                        settings,
+                        ["Speed must be greater than zero knots when using a route."],
+                    )
+                    return
+                ROUTES_DIR.mkdir(parents=True, exist_ok=True)
+                suffix = Path(filename).suffix.lower()
+                with tempfile.NamedTemporaryFile("wb", dir=ROUTES_DIR, suffix=suffix, delete=False) as stream:
+                    temporary_path = Path(stream.name)
+                    stream.write(route_upload.file.read())
+                try:
+                    route_points = parse_route(temporary_path)
+                except (OSError, ValueError, zipfile.BadZipFile) as error:
+                    try:
+                        temporary_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                    self.send_page(HTTPStatus.BAD_REQUEST, settings, [f"Invalid route: {error}"])
+                    return
+                route_path = ROUTES_DIR / f"uploaded_route{suffix}"
+                os.replace(temporary_path, route_path)
+                settings["route_file"] = str(route_path)
+                settings["route_enabled"] = True
+                settings["route_loop"] = form.get("route_loop", ["false"])[-1].lower() == "true"
+                logging.info("Uploaded route %s with %d points", filename, len(route_points))
             write_settings(self.settings_file, settings)
             self.send_page(HTTPStatus.OK, settings, message="Settings saved; emulator restarting.")
             self.wfile.flush()

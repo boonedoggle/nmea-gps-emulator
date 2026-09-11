@@ -6,6 +6,17 @@ from typing import Union
 from pyproj import Geod
 
 
+def decimal_to_degmin(latitude, longitude):
+    lat_degrees = int(abs(latitude))
+    lat_minutes = 60 * (abs(latitude) - lat_degrees)
+    lon_degrees = int(abs(longitude))
+    lon_minutes = 60 * (abs(longitude) - lon_degrees)
+    return (
+        f'{lat_degrees:02d}{lat_minutes:09.6f}', 'N' if latitude >= 0 else 'S',
+        f'{lon_degrees:03d}{lon_minutes:09.6f}', 'E' if longitude >= 0 else 'W',
+    )
+
+
 class NmeaMsg:
     """
     The class represent a group of NMEA sentences.
@@ -15,6 +26,7 @@ class NmeaMsg:
         self.utc_date_time = datetime.datetime.utcnow()
         self.position = position
         self.speed = speed
+        self.route_active = False
         # The unit's speed provided by the user during the operation of the script
         self.speed_targeted = speed
         self.heading = heading
@@ -49,7 +61,7 @@ class NmeaMsg:
     def __next__(self):
         utc_date_time_prev = self.utc_date_time
         self.utc_date_time = datetime.datetime.utcnow()
-        if self.speed > 0:
+        if self.speed > 0 and not self.route_active:
             self.position_update(utc_date_time_prev)
         if self.heading != self.heading_targeted:
             self._heading_update()
@@ -65,6 +77,26 @@ class NmeaMsg:
         self.gpvtg.sog_knots = self.speed
         self.gpzda.utc_time = self.utc_date_time
         return self.nmea_sentences
+
+    def set_route_position(self, latitude, longitude, altitude, heading, speed):
+        """Set the current position supplied by the route playback thread."""
+        lat_value, lat_direction, lon_value, lon_direction = decimal_to_degmin(
+            latitude, longitude
+        )
+        self.route_active = True
+        self.position["latitude_value"] = lat_value
+        self.position["latitude_direction"] = lat_direction
+        self.position["longitude_value"] = lon_value
+        self.position["longitude_direction"] = lon_direction
+        self.altitude = altitude
+        self.speed = speed
+        self.heading = heading
+        self.gga.altitude = altitude
+        self.gprmc.sog = speed
+        self.gprmc.cmg = heading
+        self.gphdt.heading = heading
+        self.gpvtg.heading_true = heading
+        self.gpvtg.sog_knots = speed
 
     def __iter__(self):
         return self
@@ -516,4 +548,3 @@ class Gpzda:
         # Local Zone not used
         nmea_output = f'{self.sentence_id},{self.utc_time}.000,{self.utc_date},0,0'
         return f'${nmea_output}*{NmeaMsg.check_sum(nmea_output)}\r\n'
-
