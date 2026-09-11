@@ -71,7 +71,7 @@ You can run the software package directly or as a system service
   sudo systemctl enable nmea_gps_emulator
 ```
 
-3. Start the service
+Start the stock GPSD service:
 ```bash
 sudo systemctl start gpsd
 ```
@@ -98,21 +98,17 @@ access with the network firewall if the AIR-T is on an untrusted network. When
 gpsd has a position, the page also provides a link to open that position in
 Google Maps.
 
-* Install GPSD
-
-* Edit the GPSD config file to add the NMEA emulator (on Ubuntu):
+The emulator and fallback selector use the stock GPSD service. Do not add the
+emulator TCP port to `/etc/default/gpsd`; leave the factory hardware devices
+there. Enable the application services with:
 ```bash
-$ sudo nano /etc/default/gpsd
-```
-Add the following as a device:
-```bash
-DEVICES="tcp://localhost:10110"
+sudo systemctl enable --now nmea_gps_emulator.service
+sudo systemctl enable --now nmea_gpsd_fallback.service
 ```
 
-* Restart GPSD
-```bash
-$ sudo systemctl restart gpsd
-```
+The fallback selector uses GPSD's local control socket to expose exactly one
+source at a time: the physical GPS when it has a fix, or the emulator when it
+does not.
 
 * Run `gpsmon`
 ```text
