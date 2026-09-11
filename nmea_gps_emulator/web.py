@@ -27,11 +27,27 @@ FIELDS = (
 )
 GPSD_HOST = "127.0.0.1"
 GPSD_PORT = 2947
+REAL_STATUS_FILE = "/run/nmea_gpsd_fallback.json"
+
+
+def real_gps_status():
+    """Read the physical receiver status published by the fallback supervisor."""
+    try:
+        with open(REAL_STATUS_FILE) as stream:
+            return json.load(stream)
+    except (OSError, json.JSONDecodeError):
+        return {"mode": 1, "visible_satellites": None, "used_satellites": None, "source": None}
 
 
 def current_fix(timeout=0.75):
     """Read the active gpsd source and position without changing gpsd state."""
     source = "Unavailable"
+    mode = None
+    visible_satellites = None
+    used_satellites = None
+    latitude = None
+    longitude = None
+
     try:
         with socket.create_connection((GPSD_HOST, GPSD_PORT), timeout=timeout) as sock:
             sock.settimeout(0.15)
@@ -49,20 +65,26 @@ def current_fix(timeout=0.75):
                         message = json.loads(raw.decode("utf-8"))
                     except (UnicodeDecodeError, json.JSONDecodeError):
                         continue
-                    if message.get("class") != "TPV":
-                        continue
-                    device = message.get("device")
-                    if device == "/dev/gps":
-                        source = "AIR-T hardware GPS (/dev/gps)"
-                    elif device == "tcp://localhost:10110":
-                        source = "NMEA emulator (tcp://localhost:10110)"
-                    elif device:
-                        source = str(device)
-                    if message.get("lat") is not None and message.get("lon") is not None:
-                        return source, message["lat"], message["lon"]
+                    if message.get("class") in ("TPV", "SKY"):
+                        device = message.get("device")
+                        source = str(device) if device else "Unavailable"
+                    if message.get("class") == "TPV":
+                        mode = message.get("mode", mode)
+                        latitude = message.get("lat", latitude)
+                        longitude = message.get("lon", longitude)
+                    elif message.get("class") == "SKY":
+                        visible_satellites = message.get("nSat", visible_satellites)
+                        used_satellites = message.get("uSat", used_satellites)
     except OSError:
         pass
-    return source, None, None
+    return {
+        "source": source,
+        "mode": mode,
+        "latitude": latitude,
+        "longitude": longitude,
+        "visible_satellites": visible_satellites,
+        "used_satellites": used_satellites,
+    }
 
 
 def validate_values(form, current):
@@ -90,7 +112,8 @@ def validate_values(form, current):
     return values, errors
 
 
-def page(settings, errors=(), message="", source="Unavailable", latitude=None, longitude=None):
+def page(settings, errors=(), message="", source="Unavailable", latitude=None, longitude=None,
+         mode=None, visible_satellites=None, used_satellites=None):
     fields = []
     for key, label, _minimum, _maximum, _inclusive, units in FIELDS:
         value = html.escape(str(settings.get(key, "")))
@@ -106,6 +129,12 @@ def page(settings, errors=(), message="", source="Unavailable", latitude=None, l
             f'{latitude},{longitude}" target="_blank" rel="noopener noreferrer">'
             "Show Location in Google Maps</a></p>"
         )
+    fix_status = {1: "No fix", 2: "2D fix", 3: "3D fix"}.get(mode, "Unavailable")
+    satellite_status = "Unavailable"
+    if visible_satellites is not None:
+        satellite_status = f"{visible_satellites} visible"
+        if used_satellites is not None:
+            satellite_status += f" ({used_satellites} used in solution)"
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>NMEA GPS Emulator</title>
 <style>
@@ -117,7 +146,9 @@ button {{ font: inherit; padding: .55rem .9rem; }}
 .errors {{ color: #a00; }} .message {{ color: #064; }}
 </style></head><body>
 <h1>NMEA GPS Emulator</h1>
-<p><strong>Current source:</strong> {html.escape(source)}</p>
+<p><strong>GPSd Source:</strong> {html.escape(source)}</p>
+<p><strong>GPS Status:</strong> {html.escape(fix_status)}</p>
+<p><strong>GPS Satellites:</strong> {html.escape(satellite_status)}</p>
 {location_link}
 {status}
 {('<ul class="errors">' + error_html + '</ul>') if errors else ''}
@@ -132,8 +163,14 @@ class Handler(BaseHTTPRequestHandler):
     settings_file = DEFAULT_SETTINGS_FILE
 
     def send_page(self, status, settings, errors=(), message=""):
-        source, latitude, longitude = current_fix()
-        body = page(settings, errors, message, source, latitude, longitude).encode("utf-8")
+        fix = current_fix()
+        real_status = real_gps_status()
+        source = real_status.get("source") or fix["source"]
+        body = page(
+            settings, errors, message, source, fix["latitude"], fix["longitude"],
+            real_status.get("mode"), real_status.get("visible_satellites"),
+            real_status.get("used_satellites"),
+        ).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

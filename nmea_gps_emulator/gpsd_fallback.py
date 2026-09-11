@@ -20,6 +20,7 @@ EMULATOR_DEVICE = f"tcp://localhost:{EMULATOR_PORT}"
 CHECK_INTERVAL = 2.0
 NO_FIX_GRACE = 10.0
 SERIAL_PROBE_SECONDS = 3.0
+STATUS_FILE = "/run/nmea_gpsd_fallback.json"
 
 
 class GpsdFallback:
@@ -55,7 +56,9 @@ class GpsdFallback:
         return cls.gpsd_command("-" + path)
 
     @staticmethod
-    def hardware_fix_from_gpsd(timeout=1.5):
+    def hardware_status_from_gpsd(timeout=1.5):
+        status = {"mode": None, "visible_satellites": None, "used_satellites": None,
+                  "latitude": None, "longitude": None}
         try:
             with socket.create_connection((GPSD_HOST, GPSD_PORT), timeout=1) as sock:
                 sock.settimeout(0.25)
@@ -73,20 +76,27 @@ class GpsdFallback:
                             msg = json.loads(raw.decode("utf-8"))
                         except (UnicodeDecodeError, json.JSONDecodeError):
                             continue
-                        if (msg.get("class") == "TPV"
-                                and msg.get("device") == GPS_DEVICE
-                                and msg.get("mode", 0) >= 2):
-                            return True
+                        if msg.get("device") != GPS_DEVICE:
+                            continue
+                        if msg.get("class") == "TPV":
+                            status["mode"] = msg.get("mode", status["mode"])
+                            status["latitude"] = msg.get("lat", status["latitude"])
+                            status["longitude"] = msg.get("lon", status["longitude"])
+                        elif msg.get("class") == "SKY":
+                            status["visible_satellites"] = msg.get("nSat", status["visible_satellites"])
+                            status["used_satellites"] = msg.get("uSat", status["used_satellites"])
         except (OSError, ValueError):
-            return False
-        return False
+            pass
+        return status
 
     @staticmethod
-    def serial_has_fix(timeout=SERIAL_PROBE_SECONDS):
+    def serial_status(timeout=SERIAL_PROBE_SECONDS):
+        status = {"mode": 1, "visible_satellites": None, "used_satellites": None,
+                  "latitude": None, "longitude": None}
         try:
             receiver = serial.Serial(GPS_DEVICE, 38400, timeout=0.5)
         except (OSError, serial.SerialException):
-            return False
+            return status
         buffer = bytearray()
         end = time.monotonic() + timeout
         try:
@@ -112,8 +122,15 @@ class GpsdFallback:
                             payload = frame[6:6 + length]
                             fix_type = payload[20]
                             flags = payload[21]
-                            if fix_type >= 2 and flags & 0x01:
-                                return True
+                            status["mode"] = (
+                                3 if fix_type >= 3 else 2 if fix_type == 2 else 1
+                            ) if flags & 0x01 else 1
+                            status["visible_satellites"] = payload[23]
+                            if length >= 32:
+                                status["longitude"] = int.from_bytes(payload[24:28], "little", signed=True) / 1e7
+                                status["latitude"] = int.from_bytes(payload[28:32], "little", signed=True) / 1e7
+                            if status["mode"] >= 2:
+                                return status
                         continue
                     if buffer.startswith(b"$"):
                         newline = buffer.find(b"\n")
@@ -124,12 +141,16 @@ class GpsdFallback:
                         fields = line.split("*")[0].split(",")
                         if fields[0].endswith("GGA") and len(fields) > 6:
                             try:
-                                if int(fields[6] or 0) > 0:
-                                    return True
+                                status["mode"] = 3 if int(fields[6] or 0) > 0 else 1
+                                if len(fields) > 7 and fields[7]:
+                                    status["visible_satellites"] = int(fields[7])
+                                if status["mode"] >= 2:
+                                    return status
                             except ValueError:
                                 pass
                         elif fields[0].endswith("RMC") and len(fields) > 2 and fields[2] == "A":
-                            return True
+                            status["mode"] = 3
+                            return status
                         continue
                     next_markers = [marker for marker in (buffer.find(b"\xb5\x62"), buffer.find(b"$")) if marker >= 0]
                     if not next_markers:
@@ -138,7 +159,17 @@ class GpsdFallback:
                         del buffer[:min(next_markers)]
         finally:
             receiver.close()
-        return False
+        return status
+
+    @staticmethod
+    def write_status(status, source):
+        status = dict(status)
+        status["source"] = source
+        try:
+            with open(STATUS_FILE, "w") as stream:
+                json.dump(status, stream)
+        except OSError:
+            pass
 
     @staticmethod
     def emulator_available():
@@ -154,14 +185,14 @@ class GpsdFallback:
         self.remove_device(GPS_DEVICE)
         self.add_device(EMULATOR_DEVICE)
         self.mode = "emulator"
-        logging.info("gpsd source selected: NMEA emulator fallback")
+        logging.info("gpsd source selected: %s", EMULATOR_DEVICE)
         return True
 
     def switch_to_hardware(self):
         self.remove_device(EMULATOR_DEVICE)
         self.add_device(GPS_DEVICE)
         self.mode = "hardware"
-        logging.info("gpsd source selected: AIR-T hardware GPS")
+        logging.info("gpsd source selected: %s", GPS_DEVICE)
 
     def run(self):
         no_fix_since = None
@@ -169,7 +200,9 @@ class GpsdFallback:
         try:
             while not self.stop_requested:
                 if self.mode == "hardware":
-                    if self.hardware_fix_from_gpsd():
+                    status = self.hardware_status_from_gpsd()
+                    self.write_status(status, GPS_DEVICE)
+                    if status.get("mode", 0) >= 2:
                         no_fix_since = None
                     else:
                         no_fix_since = no_fix_since or time.monotonic()
@@ -177,10 +210,12 @@ class GpsdFallback:
                             if self.switch_to_emulator():
                                 no_fix_since = None
                 else:
+                    status = self.serial_status()
+                    self.write_status(status, EMULATOR_DEVICE)
                     if not self.emulator_available():
                         logging.info("Emulator unavailable; returning to hardware GPS")
                         self.switch_to_hardware()
-                    elif self.serial_has_fix():
+                    elif status.get("mode", 0) >= 2:
                         logging.info("Hardware GPS fix detected; leaving fallback mode")
                         self.switch_to_hardware()
                 time.sleep(CHECK_INTERVAL)
