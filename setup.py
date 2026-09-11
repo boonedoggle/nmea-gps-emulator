@@ -44,7 +44,6 @@ try:
         entry_points={
             'console_scripts': [
                 'nmea_gps_emulator = nmea_gps_emulator.main:main',
-                'nmea_gpsd_fallback = nmea_gps_emulator.gpsd_fallback:main',
                 'nmea_gps_config = nmea_gps_emulator.configure:main',
             ]
         },

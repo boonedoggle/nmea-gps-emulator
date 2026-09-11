@@ -95,15 +95,15 @@ The emulator also starts a web interface at
 `http://<AIR-T-IP>:8013`. It stops and starts with the emulator service and
 binds to all IPv4 interfaces. The interface has no authentication, so restrict
 access with the network firewall if the AIR-T is on an untrusted network. When
-gpsd has a position, the page also provides a link to open that position in
-Google Maps.
+gpsd has a position, the page displays it in an interactive Leaflet map using
+OpenStreetMap tiles. The browser needs network access to load Leaflet and map
+tiles, and the required OpenStreetMap attribution is displayed on the map.
 
 The emulator and fallback selector use the stock GPSD service. Do not add the
 emulator TCP port to `/etc/default/gpsd`; leave the factory hardware devices
 there. Enable the application services with:
 ```bash
 sudo systemctl enable --now nmea_gps_emulator.service
-sudo systemctl enable --now nmea_gpsd_fallback.service
 ```
 
 The fallback selector uses GPSD's local control socket to expose exactly one

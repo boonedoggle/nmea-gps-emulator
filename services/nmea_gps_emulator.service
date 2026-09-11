@@ -7,6 +7,7 @@ After=gpsd.service
 
 [Service]
 Type=simple
+EnvironmentFile=-/etc/default/nmea_gps_emulator
 ExecStart=/usr/local/bin/nmea_gps_emulator
 Restart=always
 RestartSec=5

@@ -38,7 +38,12 @@ class GpsdFallback:
                 sock.settimeout(1)
                 sock.connect(GPSD_CONTROL_SOCKET)
                 sock.sendall((command + "\n").encode("ascii"))
-                response = sock.recv(256).decode("ascii", errors="ignore")
+                try:
+                    response = sock.recv(256).decode("ascii", errors="ignore")
+                except socket.timeout:
+                    # gpsd 3.22 may apply a control command without returning
+                    # a response before the short control-socket timeout.
+                    return True
                 if response.startswith("OK"):
                     return True
                 logging.warning("gpsd rejected control command %r: %s", command, response.strip())
@@ -202,7 +207,7 @@ class GpsdFallback:
                 if self.mode == "hardware":
                     status = self.hardware_status_from_gpsd()
                     self.write_status(status, GPS_DEVICE)
-                    if status.get("mode", 0) >= 2:
+                    if (status.get("mode") or 0) >= 2:
                         no_fix_since = None
                     else:
                         no_fix_since = no_fix_since or time.monotonic()
@@ -215,7 +220,7 @@ class GpsdFallback:
                     if not self.emulator_available():
                         logging.info("Emulator unavailable; returning to hardware GPS")
                         self.switch_to_hardware()
-                    elif status.get("mode", 0) >= 2:
+                    elif (status.get("mode") or 0) >= 2:
                         logging.info("Hardware GPS fix detected; leaving fallback mode")
                         self.switch_to_hardware()
                 time.sleep(CHECK_INTERVAL)

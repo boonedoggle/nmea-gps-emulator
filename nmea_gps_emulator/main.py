@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .nmea_gps import NmeaMsg
 from .web import start_server
+from .gpsd_fallback import GpsdFallback
 
 
 _SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -51,6 +52,12 @@ class NmeaEmulator:
         client (clients).
         """
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as tcpserver:
+            # Permit an immediate service restart after connected clients close.
+            # Without this, the previous listener can leave port 10110
+            # unavailable long enough for systemd to enter its restart loop.
+            tcpserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            if hasattr(socket, 'SO_REUSEPORT'):
+                tcpserver.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
             # Bind socket to local host and port.
             try:
                 tcpserver.bind((self.ip_address, self.port))
@@ -62,24 +69,30 @@ class NmeaEmulator:
             tcpserver.listen(10)
             print(f'Server listening on {self.ip_address}:{self.port}')
             web_server = start_server(self.settings_file)
-            while True:
-                # Number of allowed connections to TCP server.
-                max_threads = self.num_allowed_connections
-                # Scripts waiting for client calls
-                # The server is blocked and is waiting for a client
-                conn, ip_add = tcpserver.accept()
-                logging.info(f'Connected with {ip_add[0]}:{ip_add[1]}')
-                thread_list = [thread.name for thread in threading.enumerate()]
-                if len([thread_name for thread_name in thread_list if
-                        thread_name.startswith('nmea_srv')]) < max_threads:
-                    nmea_srv_thread = NmeaSrvThread(name=f'nmea_srv{uuid.uuid4().hex}',
-                                                    daemon=True, conn=conn, ip_add=ip_add,
-                                                    nmea_object=self.nmea_obj)
-                    nmea_srv_thread.start()
-                else:
-                    # Close connection if number of scheduler jobs > max_sched_jobs
-                    conn.close()
-                    logging.info(f'Connection closed with {ip_add[0]}:{ip_add[1]}')
+            fallback = GpsdFallback()
+            fallback_thread = threading.Thread(target=fallback.run, name='gpsd-fallback', daemon=True)
+            fallback_thread.start()
+            try:
+                while True:
+                    # Number of allowed connections to TCP server.
+                    max_threads = self.num_allowed_connections
+                    # Scripts waiting for client calls
+                    # The server is blocked and is waiting for a client
+                    conn, ip_add = tcpserver.accept()
+                    logging.info(f'Connected with {ip_add[0]}:{ip_add[1]}')
+                    thread_list = [thread.name for thread in threading.enumerate()]
+                    if len([thread_name for thread_name in thread_list if
+                            thread_name.startswith('nmea_srv')]) < max_threads:
+                        nmea_srv_thread = NmeaSrvThread(name=f'nmea_srv{uuid.uuid4().hex}',
+                                                        daemon=True, conn=conn, ip_add=ip_add,
+                                                        nmea_object=self.nmea_obj)
+                        nmea_srv_thread.start()
+                    else:
+                        conn.close()
+                        logging.info(f'Connection closed with {ip_add[0]}:{ip_add[1]}')
+            finally:
+                fallback.stop()
+                web_server.shutdown()
 
 
 class NmeaSrvThread(threading.Thread):
