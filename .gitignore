@@ -1,5 +1,14 @@
 .idea/
+.vscode/
 *.db
 extra/
 venv/
 __pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
