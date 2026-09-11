@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 from .nmea_gps import NmeaMsg
+from .web import start_server
 
 
 _SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -23,6 +24,7 @@ class NmeaEmulator:
     def __init__(self, settings_file):
         self.nmea_thread = None
         self.nmea_obj = None
+        self.settings_file = settings_file
         with open(settings_file) as f:
             settings = json.load(f)
         lat_value, lat_dir, lon_value, lon_dir = gps_dec_to_degmin(
@@ -59,6 +61,7 @@ class NmeaEmulator:
             # Start listening on socket
             tcpserver.listen(10)
             print(f'Server listening on {self.ip_address}:{self.port}')
+            web_server = start_server(self.settings_file)
             while True:
                 # Number of allowed connections to TCP server.
                 max_threads = self.num_allowed_connections

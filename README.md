@@ -91,6 +91,13 @@ Press Enter to keep a displayed value. Speed is entered in knots and altitude
 in meters above mean sea level. The utility validates and saves the settings,
 then restarts the emulator service.
 
+The emulator also starts a web interface at
+`http://<AIR-T-IP>:8013`. It stops and starts with the emulator service and
+binds to all IPv4 interfaces. The interface has no authentication, so restrict
+access with the network firewall if the AIR-T is on an untrusted network. When
+gpsd has a position, the page also provides a link to open that position in
+Google Maps.
+
 * Install GPSD
 
 * Edit the GPSD config file to add the NMEA emulator (on Ubuntu):
