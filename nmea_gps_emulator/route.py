@@ -89,9 +89,15 @@ class RoutePlayer:
                 fraction = (distance - start_distance) / segment_distance
                 start = self.points[index]
                 end = self.points[index + 1]
-                longitude, latitude, _ = GEOD.fwd(
-                    start[1], start[0], self.segment_bearings[index], segment_distance * fraction
-                )
+                if reverse:
+                    longitude, latitude, _ = GEOD.fwd(
+                        end[1], end[0], (self.segment_bearings[index] + 180) % 360,
+                        segment_distance * (1 - fraction),
+                    )
+                else:
+                    longitude, latitude, _ = GEOD.fwd(
+                        start[1], start[0], self.segment_bearings[index], segment_distance * fraction
+                    )
                 altitude = start[2] + (end[2] - start[2]) * fraction
                 bearing = self.segment_bearings[index]
                 if reverse:
